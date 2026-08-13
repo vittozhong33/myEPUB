@@ -5,3 +5,4 @@ src-tauri/target/
 .DS_Store
 .env
 .env.*
+release/myEPUB-0.1.0-dmg/

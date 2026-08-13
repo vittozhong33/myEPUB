@@ -6,10 +6,11 @@ myEPUB is a local desktop EPUB reader built with Tauri, React, and foliate-js.
 
 For regular macOS users, download one of these packages from this repository:
 
-- `release/myEPUB_0.1.0_aarch64.dmg`
-- `release/myEPUB_0.1.0_aarch64.app.zip`
+- `release/myEPUB_0.1.0_mac_arm64_installer.dmg`
 
-The DMG is the recommended installer. Open it, then drag `myEPUB.app` into `Applications`.
+Open the DMG, then double-click `myEPUB Installer.pkg`.
+
+Detailed Chinese installation instructions are included in `docs/INSTALL-macOS.md`.
 
 ## Compatibility
 
@@ -18,7 +19,7 @@ Current package:
 - Version: `0.1.0`
 - Platform: macOS
 - Architecture: Apple Silicon, including M1, M2, M3, and M4 Macs
-- Package type: unsigned local app
+- Package type: unsigned PKG installer inside a DMG
 
 This package is not notarized by Apple yet. On first launch, macOS may block it because it was downloaded from the internet. If that happens:
 
@@ -28,6 +29,8 @@ This package is not notarized by Apple yet. On first launch, macOS may block it 
 4. Choose `Open Anyway`.
 
 Alternatively, right-click `myEPUB.app` and choose `Open`.
+
+No developer tools are required for normal installation. Users do not need Node.js, Rust, Tauri, Xcode, or Git.
 
 ## Features
 
@@ -57,4 +60,3 @@ The generated macOS app is located at:
 ```text
 src-tauri/target/release/bundle/macos/myEPUB.app
 ```
-

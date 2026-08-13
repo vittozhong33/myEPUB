@@ -6,3 +6,6 @@ src-tauri/target/
 .env
 .env.*
 release/myEPUB-0.1.0-dmg/
+release/myEPUB-0.1.0-installer-dmg/
+release/myEPUB_0.1.0_aarch64.dmg
+release/myEPUB_0.1.0_aarch64.app.zip

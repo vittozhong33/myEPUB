@@ -2,6 +2,16 @@
 
 myEPUB is a local desktop EPUB reader built with Tauri, React, and foliate-js.
 
+## Screenshots
+
+| Library and folders | Table of contents |
+| --- | --- |
+| ![Library and folders](docs/screenshots/library.png) | ![Table of contents](docs/screenshots/table-of-contents.png) |
+
+| Two-page reading | Highlights and notes |
+| --- | --- |
+| ![Two-page reading](docs/screenshots/reading.png) | ![Highlights and notes](docs/screenshots/highlights-and-notes.png) |
+
 ## Download
 
 For regular macOS users, download one of these packages from this repository:

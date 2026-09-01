@@ -76,10 +76,20 @@ button {
   width: 16px;
 }
 
-.topbar-hotspot {
+.topbar-hover-zone {
   position: fixed;
   inset: 0 0 auto 0;
   z-index: 20;
+  height: 14px;
+}
+
+.topbar-hover-zone.open {
+  height: 64px;
+}
+
+.topbar-hotspot {
+  position: absolute;
+  inset: 0;
   height: 14px;
 }
 
@@ -390,7 +400,7 @@ button {
 }
 
 .topbar {
-  position: fixed;
+  position: absolute;
   top: 0;
   right: 0;
   left: 0;
@@ -406,11 +416,13 @@ button {
     transform 180ms ease,
     box-shadow 180ms ease;
   will-change: transform;
+  pointer-events: none;
 }
 
 .topbar.open {
   box-shadow: 0 14px 34px rgba(37, 35, 31, 0.1);
   transform: translateY(0);
+  pointer-events: auto;
 }
 
 .theme-dark .topbar {

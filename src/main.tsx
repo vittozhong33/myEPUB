@@ -193,9 +193,13 @@ const getHighlightId = () =>
 
 const compactExcerpt = (value: string) => value.replace(/\s+/g, ' ').trim().slice(0, 240);
 
-const isEditableKeyboardTarget = (target: EventTarget | null) => {
+const getEventTargetElement = (target: EventTarget | null) => {
   const node = target as (Node & { parentElement?: HTMLElement | null }) | null;
-  const element = node?.nodeType === 1 ? node as unknown as HTMLElement : node?.parentElement;
+  return node?.nodeType === 1 ? node as unknown as HTMLElement : node?.parentElement ?? null;
+};
+
+const isEditableKeyboardTarget = (target: EventTarget | null) => {
+  const element = getEventTargetElement(target);
   return Boolean(element && (
     element.matches('input, textarea, select')
     || element.isContentEditable
@@ -325,6 +329,93 @@ const tocContainsHref = (item: TocItem, href: string | undefined): boolean => {
   if (!href) return false;
   if (item.href === href) return true;
   return (item.subitems ?? []).some((child) => tocContainsHref(child, href));
+};
+
+const normalizeTocPath = (href: string) => {
+  const path = href.split('#', 1)[0].split('?', 1)[0];
+  try {
+    return decodeURIComponent(path).replace(/^\.\//, '');
+  } catch {
+    return path.replace(/^\.\//, '');
+  }
+};
+
+const getTocFragment = (href: string) => {
+  const marker = href.indexOf('#');
+  if (marker < 0) return '';
+  try {
+    return decodeURIComponent(href.slice(marker + 1));
+  } catch {
+    return href.slice(marker + 1);
+  }
+};
+
+const getChapterNumber = (label: string) => {
+  const match = label.match(/^\s*第\s*(\d+)\s*章/u);
+  return match ? Number(match[1]) : null;
+};
+
+const getSectionNumber = (label: string) => {
+  const match = label.match(/^\s*(\d+)\s*[.．]\s*(\d+)/u);
+  return match ? { chapter: Number(match[1]), section: Number(match[2]) } : null;
+};
+
+const correctTocOrder = (items: TocItem[], book: FoliateBook): TocItem[] => {
+  const sectionOrder = new Map<string, number>();
+  for (const [index, section] of (book.sections ?? []).entries()) {
+    if (section.id) sectionOrder.set(normalizeTocPath(section.id), index);
+  }
+
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  const getPosition = (item: TocItem) => {
+    const href = getTocTargetHref(item) ?? '';
+    const path = normalizeTocPath(href);
+    let section = sectionOrder.get(path);
+    if (section === undefined) {
+      const match = [...sectionOrder].find(([sectionPath]) => (
+        sectionPath.endsWith(`/${path}`) || path.endsWith(`/${sectionPath}`)
+      ));
+      section = match?.[1] ?? Number.MAX_SAFE_INTEGER;
+    }
+    return { section, fragment: getTocFragment(href) };
+  };
+
+  const sortLevel = (levelItems: TocItem[]): TocItem[] => levelItems
+    .map((item, index) => ({
+      item: {
+        ...item,
+        subitems: item.subitems?.length ? sortLevel(item.subitems) : item.subitems,
+      },
+      index,
+    }))
+    .sort((a, b) => {
+      const left = getPosition(a.item);
+      const right = getPosition(b.item);
+      return left.section - right.section
+        || collator.compare(left.fragment, right.fragment)
+        || a.index - b.index;
+    })
+    .map(({ item }) => item);
+
+  const roots = sortLevel(items);
+  const chapters = new Map<number, TocItem>();
+  for (const item of roots) {
+    const chapter = getChapterNumber(item.label);
+    if (chapter !== null) chapters.set(chapter, item);
+  }
+
+  const correctedRoots: TocItem[] = [];
+  for (const item of roots) {
+    const section = getSectionNumber(item.label);
+    const chapter = section ? chapters.get(section.chapter) : undefined;
+    if (chapter && chapter !== item) {
+      chapter.subitems = [...(chapter.subitems ?? []), item];
+    } else {
+      correctedRoots.push(item);
+    }
+  }
+
+  return sortLevel(correctedRoots);
 };
 
 function TocTree({
@@ -466,6 +557,7 @@ function App() {
   const libraryOrderRef = useRef<string[]>([]);
   const draggedLibraryKeyRef = useRef<string | null>(null);
   const highlightPopoverRef = useRef<HTMLDivElement | null>(null);
+  const higherPriorityClickRef = useRef<{ doc: Document; at: number } | null>(null);
   const restoredViewRef = useRef(false);
   const migrationPromiseRef = useRef<Promise<void> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -642,7 +734,7 @@ function App() {
 
         stage = '解析文件';
         const parsedBook = await makeBook(file);
-        const displayToc = parsedBook.toc ?? [];
+        const displayToc = correctTocOrder(parsedBook.toc ?? [], parsedBook);
 
         // Some EPUBs contain stale navigation anchors. Foliate's progress
         // indexing can reject the whole book before the first page is shown.
@@ -855,8 +947,8 @@ function App() {
         pagePress = null;
         if (!press || pointerEvent.button !== 0 || settings.flow !== 'paginated') return;
 
-        const target = pointerEvent.target;
-        if (target instanceof Element && target.closest('a, button, input, textarea, select, [contenteditable="true"]')) {
+        const target = getEventTargetElement(pointerEvent.target);
+        if (target?.closest('a, button, input, textarea, select, [contenteditable="true"]')) {
           return;
         }
 
@@ -864,6 +956,15 @@ function App() {
         const movedBy = Math.hypot(pointerEvent.clientX - press.x, pointerEvent.clientY - press.y);
         const selection = detail.doc.getSelection();
         if (heldFor >= 300 || movedBy > 7 || (selection && !selection.isCollapsed)) return;
+
+        const content = view.renderer?.getContents?.().find((item) => item.doc === detail.doc);
+        const annotationValue = content?.overlayer?.hitTest({
+          x: pointerEvent.clientX,
+          y: pointerEvent.clientY,
+        })[0];
+        if (annotationValue && highlightsRef.current.some((highlight) => highlight.cfi === annotationValue)) {
+          return;
+        }
 
         const frame = detail.doc.defaultView?.frameElement as HTMLElement | null;
         const frameRect = frame?.getBoundingClientRect();
@@ -892,8 +993,19 @@ function App() {
         }
       };
 
+      const handleHigherPriorityClick = (clickEvent: MouseEvent) => {
+        const target = getEventTargetElement(clickEvent.target);
+        const isHigherPriority = Boolean(target?.closest(
+          'a[href], button, input, textarea, select, [contenteditable="true"]',
+        ));
+        higherPriorityClickRef.current = isHigherPriority
+          ? { doc: detail.doc, at: performance.now() }
+          : null;
+      };
+
       detail.doc.addEventListener('pointerdown', handlePagePointerDown);
       detail.doc.addEventListener('pointerup', handlePagePointerUp);
+      detail.doc.addEventListener('click', handleHigherPriorityClick, true);
       detail.doc.addEventListener('keydown', handleBookKeyDown);
 
       const handleSelection = (selectionEvent: MouseEvent | KeyboardEvent) => {
@@ -988,6 +1100,11 @@ function App() {
       if (!highlight) return;
       const rangeDocument = detail.range.startContainer.ownerDocument
         ?? (detail.range.startContainer as Document);
+      const higherPriorityClick = higherPriorityClickRef.current;
+      if (
+        higherPriorityClick?.doc === rangeDocument
+        && performance.now() - higherPriorityClick.at < 250
+      ) return;
       const frame = rangeDocument.defaultView?.frameElement as HTMLElement | null;
       const frameRect = frame?.getBoundingClientRect();
       const rects = Array.from(detail.range.getClientRects());
@@ -1449,14 +1566,6 @@ function App() {
           </aside>
         </>
       )}
-      {viewMode === 'reader' && activeBook && (
-        <div
-          aria-hidden="true"
-          className="topbar-hotspot"
-          onMouseEnter={() => setTopOpen(true)}
-        />
-      )}
-
       {settingsOpen && (
         <>
           <button
@@ -1895,52 +2004,55 @@ function App() {
 
       <section className="reader-shell">
         {viewMode === 'reader' && activeBook && (
-          <header
-            className={`topbar ${topOpen ? 'open' : ''}`}
+          <div
+            className={`topbar-hover-zone ${topOpen ? 'open' : ''}`}
             onMouseEnter={() => setTopOpen(true)}
             onMouseLeave={() => setTopOpen(false)}
           >
-          <button
-            className="icon-button"
-            type="button"
-            onClick={async () => {
-              await persistCurrentLocation();
-              setSideOpen(false);
-              setSettingsOpen(false);
-              setViewMode('library');
-            }}
-          >
-            <Library size={18} />
-          </button>
-          <div className="book-heading">
-            <strong>{title || 'myEPUB'}</strong>
-            <span>{author || currentChapter || '导入一本书开始阅读'}</span>
+            <div aria-hidden="true" className="topbar-hotspot" />
+            <header className={`topbar ${topOpen ? 'open' : ''}`}>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={async () => {
+                  await persistCurrentLocation();
+                  setSideOpen(false);
+                  setSettingsOpen(false);
+                  setViewMode('library');
+                }}
+              >
+                <Library size={18} />
+              </button>
+              <div className="book-heading">
+                <strong>{title || 'myEPUB'}</strong>
+                <span>{author || currentChapter || '导入一本书开始阅读'}</span>
+              </div>
+              <div className="top-nav">
+                <span>{currentChapter || progressText}</span>
+              </div>
+              <div className="top-actions">
+                <span className="progress-pill">{progressText}</span>
+                <button
+                  className={`icon-button ${highlightsOpen ? 'selected' : ''}`}
+                  disabled={!activeBook}
+                  type="button"
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setHighlightsOpen((open) => !open);
+                  }}
+                >
+                  <Highlighter size={18} />
+                </button>
+                <button
+                  className={`icon-button ${settingsOpen ? 'selected' : ''}`}
+                  type="button"
+                  onClick={() => setSettingsOpen((open) => !open)}
+                >
+                  <Type size={18} />
+                </button>
+              </div>
+            </header>
           </div>
-          <div className="top-nav">
-            <span>{currentChapter || progressText}</span>
-          </div>
-          <div className="top-actions">
-            <span className="progress-pill">{progressText}</span>
-            <button
-              className={`icon-button ${highlightsOpen ? 'selected' : ''}`}
-              disabled={!activeBook}
-              type="button"
-              onClick={() => {
-                setSettingsOpen(false);
-                setHighlightsOpen((open) => !open);
-              }}
-            >
-              <Highlighter size={18} />
-            </button>
-            <button
-              className={`icon-button ${settingsOpen ? 'selected' : ''}`}
-              type="button"
-              onClick={() => setSettingsOpen((open) => !open)}
-            >
-              <Type size={18} />
-            </button>
-          </div>
-          </header>
         )}
 
         <div className="reader-stage">

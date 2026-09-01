@@ -18,7 +18,7 @@ export type FoliateLocation = {
 export type FoliateBook = {
   toc?: TocItem[];
   pageList?: TocItem[];
-  sections?: Array<{ linear?: string }>;
+  sections?: Array<{ id?: string; linear?: string }>;
   getCover?: () => Promise<Blob | null | undefined>;
   metadata?: {
     title?: string | Record<string, string>;
@@ -27,7 +27,13 @@ export type FoliateBook = {
 };
 
 export type FoliateRenderer = HTMLElement & {
-  getContents?: () => Array<{ doc: Document; index: number; overlayer?: unknown }>;
+  getContents?: () => Array<{
+    doc: Document;
+    index: number;
+    overlayer?: {
+      hitTest: (point: { x: number; y: number }) => [string?, Range?];
+    };
+  }>;
 };
 
 export type FoliateViewElement = HTMLElement & {

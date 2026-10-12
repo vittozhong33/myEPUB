@@ -11,8 +11,9 @@ export type FoliateLocation = {
   total?: number;
   tocItem?: {
     label?: string;
-    href?: string;
+    href?: string | null;
   };
+  range?: Range;
 };
 
 export type FoliateBook = {

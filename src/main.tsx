@@ -18,6 +18,7 @@ import {
   Moon,
   Plus,
   MessageSquareText,
+  Pencil,
   ScrollText,
   Sun,
   Trash2,
@@ -53,6 +54,7 @@ import {
   setLastViewState,
   setLibraryOrder,
   updateBookDetails,
+  updateFolder,
   type StoredHighlight,
   type StoredBook,
   type StoredFolder,
@@ -325,10 +327,59 @@ const getTocTargetHref = (item: TocItem): string | undefined => {
   return undefined;
 };
 
+const tocHrefMatches = (left: string | null | undefined, right: string | null | undefined) => {
+  if (!left || !right) return false;
+  if (left === right) return true;
+
+  const leftPath = normalizeTocPath(left);
+  const rightPath = normalizeTocPath(right);
+  const pathsMatch = leftPath === rightPath
+    || leftPath.endsWith(`/${rightPath}`)
+    || rightPath.endsWith(`/${leftPath}`);
+  if (!pathsMatch) return false;
+
+  return getTocFragment(left) === getTocFragment(right);
+};
+
 const tocContainsHref = (item: TocItem, href: string | undefined): boolean => {
   if (!href) return false;
-  if (item.href === href) return true;
+  if (tocHrefMatches(item.href, href)) return true;
   return (item.subitems ?? []).some((child) => tocContainsHref(child, href));
+};
+
+const getTocItems = (items: TocItem[]): TocItem[] => items.flatMap((item) => [
+  item,
+  ...(item.subitems?.length ? getTocItems(item.subitems) : []),
+]);
+
+const getTocItemForLocation = (
+  items: TocItem[],
+  sectionId: string | undefined,
+  range: Range | undefined,
+): TocItem | undefined => {
+  if (!sectionId) return undefined;
+  const sectionPath = normalizeTocPath(sectionId);
+  const matches = getTocItems(items).filter((item) => {
+    if (!item.href) return false;
+    const itemPath = normalizeTocPath(item.href);
+    return itemPath === sectionPath
+      || itemPath.endsWith(`/${sectionPath}`)
+      || sectionPath.endsWith(`/${itemPath}`);
+  });
+  if (!matches.length) return undefined;
+  if (!range) return matches[matches.length - 1];
+
+  let current = matches[0];
+  for (const item of matches) {
+    const fragment = getTocFragment(item.href ?? '');
+    if (!fragment) continue;
+    const doc = range.startContainer.ownerDocument;
+    const element = doc?.getElementById(fragment);
+    if (!element) continue;
+    if (range.comparePoint(element, 0) > 0) break;
+    current = item;
+  }
+  return current;
 };
 
 const normalizeTocPath = (href: string) => {
@@ -431,6 +482,16 @@ function TocTree({
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(items.map((item) => item.href ?? item.label)));
 
+  useEffect(() => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      items.forEach((item) => {
+        if (tocContainsHref(item, activeHref)) next.add(item.href ?? item.label);
+      });
+      return next;
+    });
+  }, [activeHref, items]);
+
   const toggle = (key: string) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -476,7 +537,9 @@ function TocNode({
   const hasChildren = !!item.subitems?.length;
   const isExpanded = expanded.has(key);
   const targetHref = getTocTargetHref(item);
-  const isActive = tocContainsHref(item, activeHref);
+  // Titles are not unique across a book. Only the normalized EPUB target
+  // identifies the current TOC entry, so same-named sections stay inactive.
+  const isActive = tocHrefMatches(item.href, activeHref);
 
   return (
     <div>
@@ -494,7 +557,9 @@ function TocNode({
           <span className="toc-spacer" />
         )}
         <button
+          aria-current={isActive ? 'location' : undefined}
           className={`toc-item ${isActive ? 'active' : ''}`}
+          data-toc-active={isActive ? 'true' : 'false'}
           disabled={!targetHref}
           type="button"
           onClick={() => {
@@ -543,6 +608,8 @@ function App() {
   const [highlightNote, setHighlightNote] = useState('');
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [folderName, setFolderName] = useState('');
+  const [folderToEdit, setFolderToEdit] = useState<StoredFolder | null>(null);
+  const [folderParentId, setFolderParentId] = useState<string | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<StoredFolder | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [bookMenuId, setBookMenuId] = useState<string | null>(null);
@@ -562,6 +629,17 @@ function App() {
   const migrationPromiseRef = useRef<Promise<void> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const tocRef = useRef<TocItem[]>([]);
+
+  useEffect(() => {
+    if (!sideOpen || viewMode !== 'reader' || (!location?.tocItem?.href && !location?.tocItem?.label)) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>('.toc-scroll [data-toc-active="true"]')
+        ?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location?.tocItem?.href, location?.tocItem?.label, sideOpen, toc, viewMode]);
 
   useLayoutEffect(() => {
     const element = highlightPopoverRef.current;
@@ -735,6 +813,7 @@ function App() {
         stage = '解析文件';
         const parsedBook = await makeBook(file);
         const displayToc = correctTocOrder(parsedBook.toc ?? [], parsedBook);
+        tocRef.current = displayToc;
 
         // Some EPUBs contain stale navigation anchors. Foliate's progress
         // indexing can reject the whole book before the first page is shown.
@@ -1056,10 +1135,21 @@ function App() {
 
     const handleRelocate = (event: Event) => {
       const detail = (event as CustomEvent<FoliateLocation>).detail;
+      const content = detail.range
+        ? view.renderer?.getContents?.().find((item) => item.doc === detail.range?.startContainer.ownerDocument)
+        : undefined;
+      const derivedTocItem = getTocItemForLocation(
+        tocRef.current,
+        content?.index === undefined ? undefined : view.book?.sections?.[content.index]?.id,
+        detail.range,
+      );
+      const locationDetail = detail.tocItem?.href || detail.tocItem?.label
+        ? detail.tocItem
+        : derivedTocItem;
       setPendingHighlight(null);
       setHighlightPopover(null);
-      setLocation(detail);
-      locationRef.current = detail;
+      setLocation({ ...detail, tocItem: locationDetail });
+      locationRef.current = { ...detail, tocItem: locationDetail };
 
       const bookId = openingBookIdRef.current ?? activeBookRef.current?.id;
       if (bookId) {
@@ -1067,7 +1157,7 @@ function App() {
           bookId,
           cfi: detail.cfi ?? null,
           progress: detail.fraction ?? detail.current ?? null,
-          tocLabel: detail.tocItem?.label ?? null,
+          tocLabel: locationDetail?.label ?? null,
           updatedAt: Date.now(),
         }).catch((reason) => console.error(reason));
       }
@@ -1355,6 +1445,14 @@ function App() {
       : !bookFolders[book.id]),
     [bookFolders, books, selectedFolderId],
   );
+  const folderToEditHasChildren = useMemo(
+    () => Boolean(folderToEdit && folders.some((folder) => folder.parentId === folderToEdit.id)),
+    [folderToEdit, folders],
+  );
+  const folderParentCandidates = useMemo(
+    () => folders.filter((folder) => !folder.parentId && folder.id !== folderToEdit?.id),
+    [folderToEdit, folders],
+  );
   const visibleLibraryKeys = useMemo(
     () => [
       ...visibleFolders.map((folder) => `folder:${folder.id}`),
@@ -1472,16 +1570,23 @@ function App() {
   const saveLibraryFolder = async () => {
     const name = folderName.trim();
     if (!name) return;
-    const parentId = selectedFolder && !selectedFolder.parentId ? selectedFolder.id : null;
+    const parentId = folderToEdit
+      ? (folderToEditHasChildren ? null : folderParentId)
+      : (selectedFolder && !selectedFolder.parentId ? selectedFolder.id : null);
     if (folders.some((folder) => (
+      folder.id !== folderToEdit?.id
+      &&
       (folder.parentId ?? null) === parentId
       && folder.name.toLocaleLowerCase() === name.toLocaleLowerCase()
     ))) {
       setError('已经有同名文件夹。');
       return;
     }
-    await createFolder(name, parentId);
+    if (folderToEdit) await updateFolder(folderToEdit.id, name, parentId);
+    else await createFolder(name, parentId);
     setFolderName('');
+    setFolderToEdit(null);
+    setFolderParentId(null);
     setFolderDialogOpen(false);
     await refreshBooks();
   };
@@ -1549,7 +1654,7 @@ function App() {
                   onWheel={(event) => event.stopPropagation()}
                 >
                   <TocTree
-                    activeHref={location?.tocItem?.href}
+                    activeHref={location?.tocItem?.href ?? undefined}
                     items={toc}
                     onSelect={(href) => {
                       jumpToTocHref(href).catch((reason) => {
@@ -1890,13 +1995,15 @@ function App() {
             onClick={() => {
               setFolderDialogOpen(false);
               setFolderName('');
+              setFolderToEdit(null);
+              setFolderParentId(null);
             }}
           />
           <section className="note-dialog folder-dialog">
             <div className="modal-head">
               <div>
-                <h2>新建文件夹</h2>
-                <p>{selectedFolder ? `在“${selectedFolder.name}”中新建子文件夹` : '给这一组图书起个名字'}</p>
+                <h2>{folderToEdit ? '编辑文件夹' : '新建文件夹'}</h2>
+                <p>{folderToEdit ? '可修改名称和上级位置，文件夹内的书籍保持不变' : (selectedFolder ? `在“${selectedFolder.name}”中新建子文件夹` : '给这一组图书起个名字')}</p>
               </div>
               <button
                 aria-label="关闭"
@@ -1905,6 +2012,8 @@ function App() {
                 onClick={() => {
                   setFolderDialogOpen(false);
                   setFolderName('');
+                  setFolderToEdit(null);
+                  setFolderParentId(null);
                 }}
               >
                 <X size={18} />
@@ -1925,6 +2034,35 @@ function App() {
                 }
               }}
             />
+            {folderToEdit && (
+              <div className="folder-parent-picker">
+                <div className="folder-parent-heading">
+                  <span>上级位置</span>
+                  {folderToEditHasChildren && <small>包含子文件夹，须保留在顶层</small>}
+                </div>
+                <div className="folder-parent-options">
+                  <button
+                    className={!folderParentId ? 'selected' : ''}
+                    type="button"
+                    onClick={() => setFolderParentId(null)}
+                  >
+                    <span><Library size={17} />书库（顶层）</span>
+                    {!folderParentId && <Check size={16} />}
+                  </button>
+                  {!folderToEditHasChildren && folderParentCandidates.map((folder) => (
+                    <button
+                      key={folder.id}
+                      className={folderParentId === folder.id ? 'selected' : ''}
+                      type="button"
+                      onClick={() => setFolderParentId(folder.id)}
+                    >
+                      <span><Folder size={17} />{folder.name}</span>
+                      {folderParentId === folder.id && <Check size={16} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="dialog-actions">
               <button
                 className="text-button"
@@ -1932,6 +2070,8 @@ function App() {
                 onClick={() => {
                   setFolderDialogOpen(false);
                   setFolderName('');
+                  setFolderToEdit(null);
+                  setFolderParentId(null);
                 }}
               >
                 取消
@@ -1947,7 +2087,7 @@ function App() {
                   });
                 }}
               >
-                创建
+                {folderToEdit ? '保存' : '创建'}
               </button>
             </div>
           </section>
@@ -2094,7 +2234,12 @@ function App() {
                     <button
                       className="library-folder-button"
                       type="button"
-                      onClick={() => setFolderDialogOpen(true)}
+                      onClick={() => {
+                        setFolderToEdit(null);
+                        setFolderName('');
+                        setFolderParentId(selectedFolder && !selectedFolder.parentId ? selectedFolder.id : null);
+                        setFolderDialogOpen(true);
+                      }}
                     >
                       <FolderPlus size={18} />
                       新建文件夹
@@ -2149,18 +2294,35 @@ function App() {
                           <span>{count} 本图书</span>
                         </span>
                       </button>
-                      <button
-                        aria-label={`删除文件夹 ${folder.name}`}
-                        className="icon-button"
-                        type="button"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setFolderToDelete(folder);
-                        }}
-                      >
-                        <Trash2 size={17} />
-                      </button>
+                      <div className="folder-card-actions">
+                        <button
+                          aria-label={`编辑文件夹 ${folder.name}`}
+                          className="icon-button"
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setFolderToEdit(folder);
+                            setFolderName(folder.name);
+                            setFolderParentId(folder.parentId ?? null);
+                            setFolderDialogOpen(true);
+                          }}
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          aria-label={`删除文件夹 ${folder.name}`}
+                          className="icon-button"
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setFolderToDelete(folder);
+                          }}
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </div>
                       {sortMode && (
                         <span
                           className="library-sort-surface"

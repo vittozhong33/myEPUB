@@ -372,8 +372,8 @@ button {
 }
 
 .toc-item.active {
-  background: rgba(35, 90, 124, 0.16);
-  color: #173f5a;
+  background: rgba(42, 39, 32, 0.17);
+  color: inherit;
   font-weight: 720;
 }
 
@@ -386,8 +386,8 @@ button {
 }
 
 .theme-dark .toc-item.active {
-  background: rgba(74, 134, 168, 0.22);
-  color: #cdeaff;
+  background: rgba(255, 255, 255, 0.16);
+  color: inherit;
 }
 
 .reader-shell {
@@ -1755,6 +1755,85 @@ button {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.folder-parent-picker {
+  display: grid;
+  gap: 7px;
+}
+
+.folder-parent-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: #625c53;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.folder-parent-heading small {
+  color: #8a8378;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.folder-parent-options {
+  display: grid;
+  max-height: 174px;
+  gap: 3px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid rgba(42, 39, 32, 0.12);
+  border-radius: 8px;
+  background: rgba(42, 39, 32, 0.025);
+}
+
+.folder-parent-options button {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-parent-options button > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-parent-options button:hover,
+.folder-parent-options button.selected {
+  background: rgba(35, 90, 124, 0.1);
+  color: #235a7c;
+}
+
+.theme-dark .folder-parent-heading {
+  color: #d0c9bd;
+}
+
+.theme-dark .folder-parent-heading small {
+  color: #9f988d;
+}
+
+.theme-dark .folder-parent-options {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.theme-dark .folder-parent-options button:hover,
+.theme-dark .folder-parent-options button.selected {
+  background: rgba(155, 200, 228, 0.12);
+  color: #b7d9ef;
+}
+
 .library-book > .icon-button {
   position: absolute;
   z-index: 5;
@@ -1769,6 +1848,31 @@ button {
   transition: opacity 140ms ease;
 }
 
+.folder-card-actions {
+  position: absolute;
+  z-index: 5;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.folder-card-actions .icon-button {
+  width: 34px;
+  height: 34px;
+  background: rgba(245, 239, 228, 0.86);
+  box-shadow: 0 8px 20px rgba(42, 39, 32, 0.16);
+}
+
+.library-folder-card:hover .folder-card-actions,
+.library-folder-card:focus-within .folder-card-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .library-book:hover > .icon-button,
 .library-book:focus-within > .icon-button {
   opacity: 1;
@@ -1776,6 +1880,10 @@ button {
 }
 
 .theme-dark .library-book > .icon-button {
+  background: rgba(24, 24, 24, 0.86);
+}
+
+.theme-dark .folder-card-actions .icon-button {
   background: rgba(24, 24, 24, 0.86);
 }
 

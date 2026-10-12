@@ -273,6 +273,23 @@ export const createFolder = async (name: string, parentId: string | null = null)
   return folder;
 };
 
+export const updateFolder = async (
+  folderId: string,
+  name: string,
+  parentId: string | null,
+) => {
+  const folder = await transact<StoredFolder | undefined>(
+    FOLDER_STORE,
+    'readonly',
+    (store) => store.get(folderId),
+  );
+  if (!folder) throw new Error('文件夹不存在');
+
+  const updated = { ...folder, name: name.trim(), parentId };
+  await transact(FOLDER_STORE, 'readwrite', (store) => store.put(updated));
+  return updated;
+};
+
 export const listBookFolders = () =>
   transact<StoredBookFolder[]>(BOOK_FOLDER_STORE, 'readonly', (store) => store.getAll());
 

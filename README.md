@@ -47,7 +47,7 @@ No developer tools are required for normal installation. Users do not need Node.
 - Import and read local EPUB files.
 - Keep books in a managed local storage folder.
 - Resume the last app location and per-book reading progress.
-- Organize books with custom folders and nested folders.
+- Organize books with custom folders and nested folders, including renaming and moving folders.
 - Customize typography, theme, and reading background colors.
 - Highlight text and save notes.
 - Manually sort books and folders.
